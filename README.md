@@ -4,7 +4,7 @@ Internal-only HTTP service that auto-registers OIDC clients with the co-located 
 
 ## What it does
 
-A sidecar POSTs its redirect URIs to `http://authelia-registrar:9092/register`. The registrar:
+A sidecar POSTs its redirect URIs to `http://auth-registrar:9092/register`. The registrar:
 
 1. Identifies the caller via **PTR lookup of the source IP on the pcs network's embedded DNS** (`127.0.0.11`). The result is the caller's Docker `container_name`, which the app store already constrains to equal the store ID. `client_id` is derived, not accepted.
 2. Validates each redirect URI's hostname: the first DNS label must equal `<client_id>` or start with `<client_id>-` (mesh-router routes `<app>-<user>.<domain>` to the container named `<app>`). Prevents app A from claiming app B's callback URL.
@@ -60,9 +60,9 @@ Error codes:
 This service runs alongside Authelia in the PCS stack. Required mounts:
 
 ```yaml
-authelia-registrar:
+auth-registrar:
   image: rg.fr-par.scw.cloud/aptero/mesh-router-auth:latest
-  container_name: authelia-registrar
+  container_name: auth-registrar
   environment:
     ISSUER_URL: https://auth-${DOMAIN}
   volumes:
@@ -83,7 +83,7 @@ authelia-registrar:
 ## Caller contract (hash-lock sidecar, etc.)
 
 ```ts
-const res = await fetch("http://authelia-registrar:9092/register", {
+const res = await fetch("http://auth-registrar:9092/register", {
   method: "POST",
   headers: { "content-type": "application/json" },
   body: JSON.stringify({
