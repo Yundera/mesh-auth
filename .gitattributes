@@ -1,0 +1,3 @@
+# Auto-detect text files and normalize to LF on commit. Stops Windows / WSL
+# checkouts from showing every file as modified against LF-stored blobs.
+* text=auto eol=lf
