@@ -26,7 +26,10 @@ class StubRegistrar implements Registrar {
 const baseConfig: Config = {
     port: 0,
     issuerUrl: "https://auth-test.local",
+    backend: "authelia",
     scriptPath: "/dev/null",
+    dexGrpcAddr: "dex:5557",
+    dexClientsDir: "/tmp/dex-clients",
     redirectUriHostnameSuffix: undefined,
     dnsResolver: "127.0.0.11",
     maxRedirectUris: 10,

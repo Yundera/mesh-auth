@@ -1,18 +1,20 @@
 {
   "name": "@aptero/mesh-router-auth",
-  "version": "0.1.0",
-  "description": "OIDC client registration service for Authelia. Derives client_id from the caller's docker container name via PTR lookup and delegates registration to register-oidc-client.sh.",
+  "version": "0.2.0",
+  "description": "OIDC client registration service. Derives client_id from the caller's docker container name via PTR lookup. Pluggable backend: Authelia (register-oidc-client.sh) or Dex (gRPC CreateClient), selected via REGISTRAR_BACKEND.",
   "main": "dist/index.js",
   "type": "module",
   "private": false,
   "scripts": {
     "exec": "concurrently \"tsc && node dist\"",
-    "build": "tsc",
+    "build": "tsc && node scripts/copy-assets.mjs",
     "start": "tsc-watch --onSuccess \"node ./dist\"",
     "test": "tsc && mocha dist/**/*.spec.js",
     "lint": "eslint src --ext ts"
   },
   "dependencies": {
+    "@grpc/grpc-js": "^1.12.5",
+    "@grpc/proto-loader": "^0.7.13",
     "express": "^5.2.1",
     "typescript": "5.9.3"
   },

@@ -1,0 +1,63 @@
+// Minimal subset of Dex's gRPC API (api/v2/api.proto) — only the client-
+// management RPCs the registrar uses. Field numbers MUST match upstream Dex so
+// the wire format is compatible. Verified against ghcr.io/dexidp/dex:v2.43.1.
+syntax = "proto3";
+
+package api;
+
+option go_package = "github.com/dexidp/dex/api/v2;api";
+
+// Client represents an OAuth2 client.
+message Client {
+  string id = 1;
+  string secret = 2;
+  repeated string redirect_uris = 3;
+  repeated string trusted_peers = 4;
+  bool public = 5;
+  string name = 6;
+  string logo_url = 7;
+}
+
+message CreateClientReq {
+  Client client = 1;
+}
+
+message CreateClientResp {
+  bool already_exists = 1;
+  Client client = 2;
+}
+
+message UpdateClientReq {
+  string id = 1;
+  repeated string redirect_uris = 2;
+  repeated string trusted_peers = 3;
+  string name = 4;
+  string logo_url = 5;
+}
+
+message UpdateClientResp {
+  bool not_found = 1;
+}
+
+message DeleteClientReq {
+  string id = 1;
+}
+
+message DeleteClientResp {
+  bool not_found = 1;
+}
+
+message VersionReq {}
+
+message VersionResp {
+  string server = 1;
+  int32 api = 2;
+}
+
+// Dex represents the dex gRPC service (subset).
+service Dex {
+  rpc CreateClient(CreateClientReq) returns (CreateClientResp) {};
+  rpc UpdateClient(UpdateClientReq) returns (UpdateClientResp) {};
+  rpc DeleteClient(DeleteClientReq) returns (DeleteClientResp) {};
+  rpc GetVersion(VersionReq) returns (VersionResp) {};
+}
