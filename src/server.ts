@@ -36,19 +36,14 @@ export function buildServer(deps: ServerDeps): Express {
             validateContainerName(clientId);
 
             // Independently recompute the exact hostnames this app may use, from
-            // its PTR-attested identity — never from anything the caller sent.
-            // The submitted redirect_uris are then verified to be a subset.
-            const allowedHosts = new Set(
-                computeAppHosts(clientId, {
-                    domain: config.domain,
-                    publicIpDash: config.publicIpDash,
-                    appHostTemplates: config.appHostTemplates,
-                }),
-            );
+            // its PTR-attested identity + the configured suffix list — never from
+            // anything the caller sent. The submitted redirect_uris are then
+            // verified to be a subset. Empty list => fail closed (reject all).
+            const allowedHosts = new Set(computeAppHosts(clientId, config.hostSuffixes));
             if (allowedHosts.size === 0) {
                 throw new ValidationError(
-                    `no allowed redirect hosts could be computed for app ${JSON.stringify(clientId)} ` +
-                        `(check DOMAIN / PUBLIC_IP_DASH / APP_HOST_TEMPLATES)`,
+                    `no allowed redirect hosts configured for app ${JSON.stringify(clientId)} ` +
+                        `(set REDIRECT_HOST_SUFFIXES)`,
                 );
             }
 

@@ -32,9 +32,7 @@ const baseConfig: Config = {
     dexClientsDir: "/tmp/dex-clients",
     dnsResolver: "127.0.0.11",
     maxRedirectUris: 10,
-    domain: "alice.nsl.sh",
-    publicIpDash: "203-0-113-10",
-    appHostTemplates: ["{APP}-{DOMAIN}", "{APP}-{IP_DASH}.nip.io", "{APP}-{IP_DASH}.sslip.io"],
+    hostSuffixes: ["alice.nsl.sh", "203-0-113-10.nip.io", "203-0-113-10.sslip.io"],
 };
 
 interface TestServer {

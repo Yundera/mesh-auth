@@ -1,7 +1,7 @@
 import { expect } from "chai";
 import { computeAppHosts, validateContainerName, validateRedirectUri, ValidationError } from "../validation.js";
 
-const DEFAULT_TEMPLATES = ["{APP}-{DOMAIN}", "{APP}-{IP_DASH}.nip.io", "{APP}-{IP_DASH}.sslip.io"];
+const SUFFIXES = ["wisera.inojob.com", "80-241-218-30.nip.io", "80-241-218-30.sslip.io"];
 
 describe("validateContainerName", () => {
     it("accepts valid names", () => {
@@ -29,44 +29,30 @@ describe("validateContainerName", () => {
 });
 
 describe("computeAppHosts", () => {
-    const params = { domain: "wisera.inojob.com", publicIpDash: "80-241-218-30", appHostTemplates: DEFAULT_TEMPLATES };
-
-    it("computes the three canonical hosts from the attested client_id", () => {
-        expect(computeAppHosts("appshield-demo", params)).to.deep.equal([
+    it("computes <app>-<suffix> for each configured suffix", () => {
+        expect(computeAppHosts("appshield-demo", SUFFIXES)).to.deep.equal([
             "appshield-demo-wisera.inojob.com",
             "appshield-demo-80-241-218-30.nip.io",
             "appshield-demo-80-241-218-30.sslip.io",
         ]);
     });
 
-    it("skips IP templates when PUBLIC_IP_DASH is empty", () => {
-        expect(computeAppHosts("myapp", { ...params, publicIpDash: "" })).to.deep.equal(["myapp-wisera.inojob.com"]);
+    it("returns an empty set when no suffixes are configured", () => {
+        expect(computeAppHosts("myapp", [])).to.deep.equal([]);
     });
 
-    it("skips the domain template when DOMAIN is empty", () => {
-        expect(computeAppHosts("myapp", { ...params, domain: "" })).to.deep.equal([
-            "myapp-80-241-218-30.nip.io",
-            "myapp-80-241-218-30.sslip.io",
-        ]);
-    });
-
-    it("lowercases the result and honours a custom template array", () => {
-        expect(computeAppHosts("MyApp", { domain: "Alice.NSL.sh", publicIpDash: "", appHostTemplates: ["{APP}.{DOMAIN}"] })).to.deep.equal([
-            "myapp.alice.nsl.sh",
+    it("lowercases the result and is agnostic to what the suffix is", () => {
+        expect(computeAppHosts("MyApp", ["Alice.Example.COM", "tenant-7.internal"])).to.deep.equal([
+            "myapp-alice.example.com",
+            "myapp-tenant-7.internal",
         ]);
     });
 });
 
 describe("validateRedirectUri", () => {
-    // The allowlist is recomputed from the PTR-attested client_id — exactly what
-    // server.ts passes to the validator.
-    const allowedHosts = new Set(
-        computeAppHosts("appshield-demo", {
-            domain: "wisera.inojob.com",
-            publicIpDash: "80-241-218-30",
-            appHostTemplates: DEFAULT_TEMPLATES,
-        }),
-    );
+    // The allowlist is recomputed from the PTR-attested client_id + suffix list —
+    // exactly what server.ts passes to the validator.
+    const allowedHosts = new Set(computeAppHosts("appshield-demo", SUFFIXES));
     const opts = { clientId: "appshield-demo", allowedHosts };
 
     it("accepts each canonical host (any callback path)", () => {

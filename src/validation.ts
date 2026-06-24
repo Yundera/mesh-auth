@@ -14,42 +14,25 @@ export function validateContainerName(name: string): void {
     }
 }
 
-export interface AppHostParams {
-    domain: string;
-    publicIpDash: string;
-    appHostTemplates: string[];
-}
-
 /**
- * Recompute the exact set of public hostnames an app is reachable under, using
- * the SAME formula the Caddy labels are generated from (always
- * `<app>-<userdomain>`, plus the IP-based fallback providers):
+ * Recompute the exact set of public hostnames an app is reachable under:
+ * `<client_id>-<suffix>` for each configured suffix. The `<app>-<suffix>` join
+ * is the fixed mesh-router subdomain convention; the suffix list is pure config
+ * (see Config.hostSuffixes) so the registrar knows nothing about specific
+ * domains or DNS providers.
  *
- *   {APP}-{DOMAIN}            -> appshield-demo-wisera.inojob.com
- *   {APP}-{IP_DASH}.nip.io    -> appshield-demo-80-241-218-30.nip.io
- *   {APP}-{IP_DASH}.sslip.io  -> appshield-demo-80-241-218-30.sslip.io
+ *   suffixes ["wisera.inojob.com", "80-241-218-30.nip.io", "80-241-218-30.sslip.io"]
+ *   -> appshield-demo-wisera.inojob.com,
+ *      appshield-demo-80-241-218-30.nip.io,
+ *      appshield-demo-80-241-218-30.sslip.io
  *
  * `clientId` is the PTR-attested container name — NOT anything the caller sent —
- * so an app can only ever get redirect URIs under its own hostnames. A template
- * whose required substitution value is empty is skipped (e.g. no PUBLIC_IP_DASH
- * configured => no nip.io/sslip.io hosts). Hosts are lowercased for comparison.
- *
- * Keep this formula in sync with the Caddy-label generator and the AppShield
- * gate (auth-service) — see SSO/AppShield host-formula doc.
+ * so an app can only ever get redirect URIs under its own hostnames. Hosts are
+ * lowercased for comparison. Keep this `<app>-<suffix>` join in sync with the
+ * Caddy-label generator and the AppShield gate — see SSO/AppShield host doc.
  */
-export function computeAppHosts(clientId: string, params: AppHostParams): string[] {
-    const hosts: string[] = [];
-    for (const tpl of params.appHostTemplates) {
-        if (tpl.includes("{DOMAIN}") && !params.domain) continue;
-        if (tpl.includes("{IP_DASH}") && !params.publicIpDash) continue;
-        const host = tpl
-            .split("{APP}").join(clientId)
-            .split("{DOMAIN}").join(params.domain)
-            .split("{IP_DASH}").join(params.publicIpDash)
-            .toLowerCase();
-        hosts.push(host);
-    }
-    return hosts;
+export function computeAppHosts(clientId: string, hostSuffixes: readonly string[]): string[] {
+    return hostSuffixes.map((suffix) => `${clientId}-${suffix}`.toLowerCase());
 }
 
 export interface ValidateRedirectOptions {
