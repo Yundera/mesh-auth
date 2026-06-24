@@ -14,9 +14,48 @@ export function validateContainerName(name: string): void {
     }
 }
 
+export interface AppHostParams {
+    domain: string;
+    publicIpDash: string;
+    appHostTemplates: string[];
+}
+
+/**
+ * Recompute the exact set of public hostnames an app is reachable under, using
+ * the SAME formula the Caddy labels are generated from (always
+ * `<app>-<userdomain>`, plus the IP-based fallback providers):
+ *
+ *   {APP}-{DOMAIN}            -> appshield-demo-wisera.inojob.com
+ *   {APP}-{IP_DASH}.nip.io    -> appshield-demo-80-241-218-30.nip.io
+ *   {APP}-{IP_DASH}.sslip.io  -> appshield-demo-80-241-218-30.sslip.io
+ *
+ * `clientId` is the PTR-attested container name — NOT anything the caller sent —
+ * so an app can only ever get redirect URIs under its own hostnames. A template
+ * whose required substitution value is empty is skipped (e.g. no PUBLIC_IP_DASH
+ * configured => no nip.io/sslip.io hosts). Hosts are lowercased for comparison.
+ *
+ * Keep this formula in sync with the Caddy-label generator and the AppShield
+ * gate (auth-service) — see SSO/AppShield host-formula doc.
+ */
+export function computeAppHosts(clientId: string, params: AppHostParams): string[] {
+    const hosts: string[] = [];
+    for (const tpl of params.appHostTemplates) {
+        if (tpl.includes("{DOMAIN}") && !params.domain) continue;
+        if (tpl.includes("{IP_DASH}") && !params.publicIpDash) continue;
+        const host = tpl
+            .split("{APP}").join(clientId)
+            .split("{DOMAIN}").join(params.domain)
+            .split("{IP_DASH}").join(params.publicIpDash)
+            .toLowerCase();
+        hosts.push(host);
+    }
+    return hosts;
+}
+
 export interface ValidateRedirectOptions {
     clientId: string;
-    hostnameSuffix: string | undefined;
+    // Exact hostnames allowed for this app, precomputed via computeAppHosts().
+    allowedHosts: ReadonlySet<string>;
 }
 
 export function validateRedirectUri(uri: string, opts: ValidateRedirectOptions): void {
@@ -31,29 +70,21 @@ export function validateRedirectUri(uri: string, opts: ValidateRedirectOptions):
         throw new ValidationError(`invalid redirect URI: ${uri}`);
     }
 
-    if (url.protocol !== "https:" && url.protocol !== "http:") {
-        throw new ValidationError(
-            `redirect URI must use http:// or https:// (got: ${url.protocol})`,
-        );
+    // https only — the redirect carries the auth code; never hand it to a
+    // downgraded http origin. (All real app hosts are https behind the gateway.)
+    if (url.protocol !== "https:") {
+        throw new ValidationError(`redirect URI must use https:// (got: ${url.protocol})`);
     }
 
-    if (opts.hostnameSuffix && !url.hostname.endsWith(opts.hostnameSuffix)) {
+    // The host is the security boundary: it's where the IdP delivers the code,
+    // and mesh-router routes each host to exactly one container. Require an exact
+    // match against the recomputed allowlist. Path/query/fragment are NOT
+    // constrained — different apps use different callback paths.
+    const host = url.hostname.toLowerCase();
+    if (!opts.allowedHosts.has(host)) {
         throw new ValidationError(
-            `redirect URI hostname must end with ${opts.hostnameSuffix}: ${uri}`,
-        );
-    }
-
-    // The caller is identified by container_name (e.g. "myapp"). Mesh-router routes
-    // subdomain "myapp-<user>.<domain>" to that container, so we accept either
-    // "myapp.<domain>" (exact first-label match) or "myapp-<anything>.<domain>".
-    // A trailing dash is required in the second case — this blocks "myapp2.<domain>",
-    // "myappX.<domain>", etc. which would otherwise slip past a naive startsWith().
-    const firstLabel = url.hostname.split(".")[0] ?? "";
-    const okExact = firstLabel === opts.clientId;
-    const okDashed = firstLabel.startsWith(opts.clientId + "-") && firstLabel.length > opts.clientId.length + 1;
-    if (!okExact && !okDashed) {
-        throw new ValidationError(
-            `redirect URI hostname's first label (${JSON.stringify(firstLabel)}) must equal ${JSON.stringify(opts.clientId)} or start with ${JSON.stringify(opts.clientId + "-")}`,
+            `redirect URI host ${JSON.stringify(host)} is not allowed for app ${JSON.stringify(opts.clientId)}; ` +
+                `expected one of: ${[...opts.allowedHosts].join(", ") || "(none configured)"}`,
         );
     }
 }

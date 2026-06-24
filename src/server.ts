@@ -2,7 +2,7 @@ import express, { Express, NextFunction, Request, Response } from "express";
 import { Attestor, AttestationError } from "./attestation.js";
 import { Config } from "./config.js";
 import { Registrar, RegistrationError } from "./registration.js";
-import { ValidationError, validateContainerName, validateRedirectUri } from "./validation.js";
+import { ValidationError, computeAppHosts, validateContainerName, validateRedirectUri } from "./validation.js";
 
 export interface ServerDeps {
     config: Config;
@@ -35,6 +35,23 @@ export function buildServer(deps: ServerDeps): Express {
             const clientId = await attestor.resolveContainerName(sourceIp);
             validateContainerName(clientId);
 
+            // Independently recompute the exact hostnames this app may use, from
+            // its PTR-attested identity — never from anything the caller sent.
+            // The submitted redirect_uris are then verified to be a subset.
+            const allowedHosts = new Set(
+                computeAppHosts(clientId, {
+                    domain: config.domain,
+                    publicIpDash: config.publicIpDash,
+                    appHostTemplates: config.appHostTemplates,
+                }),
+            );
+            if (allowedHosts.size === 0) {
+                throw new ValidationError(
+                    `no allowed redirect hosts could be computed for app ${JSON.stringify(clientId)} ` +
+                        `(check DOMAIN / PUBLIC_IP_DASH / APP_HOST_TEMPLATES)`,
+                );
+            }
+
             const body = req.body as RegisterRequestBody;
             const rawRedirects = body?.redirect_uris;
             if (!Array.isArray(rawRedirects) || rawRedirects.length === 0) {
@@ -51,10 +68,7 @@ export function buildServer(deps: ServerDeps): Express {
                 if (typeof uri !== "string") {
                     throw new ValidationError("each redirect_uris entry must be a string");
                 }
-                validateRedirectUri(uri, {
-                    clientId,
-                    hostnameSuffix: config.redirectUriHostnameSuffix,
-                });
+                validateRedirectUri(uri, { clientId, allowedHosts });
                 redirectUris.push(uri);
             }
 

@@ -30,9 +30,11 @@ const baseConfig: Config = {
     scriptPath: "/dev/null",
     dexGrpcAddr: "dex:5557",
     dexClientsDir: "/tmp/dex-clients",
-    redirectUriHostnameSuffix: undefined,
     dnsResolver: "127.0.0.11",
     maxRedirectUris: 10,
+    domain: "alice.nsl.sh",
+    publicIpDash: "203-0-113-10",
+    appHostTemplates: ["{APP}-{DOMAIN}", "{APP}-{IP_DASH}.nip.io", "{APP}-{IP_DASH}.sslip.io"],
 };
 
 interface TestServer {
@@ -101,7 +103,7 @@ describe("server /register", () => {
                 redirect_uris: ["https://otherapp-alice.nsl.sh/cb"],
             });
             expect(status).to.equal(400);
-            expect(body.error).to.match(/first label/);
+            expect(body.error).to.match(/not allowed for app/);
             expect(reg.calls).to.have.length(0);
         } finally {
             await srv.close();
