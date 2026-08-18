@@ -1,6 +1,6 @@
 {
   "name": "@aptero/mesh-router-auth",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "OIDC client registration service. Derives client_id from the caller's docker container name via PTR lookup. Pluggable backend: Authelia (register-oidc-client.sh) or Dex (gRPC CreateClient), selected via REGISTRAR_BACKEND.",
   "main": "dist/index.js",
   "type": "module",

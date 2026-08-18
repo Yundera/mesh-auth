@@ -1,3 +1,5 @@
+import { validateContainerName } from "./validation.js";
+
 // Which OIDC provider backend client registration targets.
 //   "authelia" (default) -> ShellRegistrar (register-oidc-client.sh) — current prod behavior.
 //   "dex"                 -> DexGrpcRegistrar (Dex gRPC CreateClient).
@@ -24,6 +26,11 @@ export interface Config {
     //    appshield-demo-80-241-218-30.sslip.io
     // The `<app>-<suffix>` join is the fixed mesh-router subdomain convention.
     hostSuffixes: string[];
+    // The one app allowed to register callbacks on the BARE suffixes as well as
+    // its own `<app>-<suffix>` hosts — i.e. whoever the PCS root domain proxies
+    // to. Empty string = nobody, and the bare hostnames have no OIDC owner.
+    // Sourced from ROOT_CLIENT_ID; see parseRootClientId.
+    rootClientId: string;
 }
 
 // REDIRECT_HOST_SUFFIXES is a comma-separated list of host suffixes (the part
@@ -38,6 +45,35 @@ function parseHostSuffixes(raw: string | undefined): string[] {
         if (s) seen.add(s);
     }
     return [...seen];
+}
+
+/**
+ * ROOT_CLIENT_ID names the container the PCS root domain reverse-proxies to —
+ * in practice the deployment feeds it Caddy's own DEFAULT_SERVICE_HOST, so the
+ * app that OWNS the bare hostname and the app the bare hostname ROUTES to are
+ * the same fact rather than two settings that can drift apart.
+ *
+ * That value is a proxy upstream target, not an identity: the Caddyfile
+ * documents `host.docker.internal` as legal, the settings-center Domain panel
+ * accepts dots and uppercase, and neither is a container name. So normalise and
+ * run it through the same check as an attested name — anything that fails means
+ * the root domain does not point at a container we can attest, and nobody gets
+ * the bare hostnames. Fail closed and say so at boot; a silent "off" here looks
+ * exactly like the bug this feature fixes.
+ */
+function parseRootClientId(raw: string | undefined): string {
+    const value = (raw ?? "").trim().toLowerCase();
+    if (!value) return "";
+    try {
+        validateContainerName(value);
+        return value;
+    } catch {
+        console.warn(
+            `[registrar] ROOT_CLIENT_ID ${JSON.stringify(raw)} is not a container name; ` +
+                `no app may claim the bare redirect hosts`,
+        );
+        return "";
+    }
 }
 
 export function loadConfig(): Config {
@@ -66,7 +102,12 @@ export function loadConfig(): Config {
         dexGrpcAddr: process.env.DEX_GRPC_ADDR ?? "dex:5557",
         dexClientsDir: process.env.DEX_CLIENTS_DIR ?? "/DATA/AppData/yundera/dex/clients",
         dnsResolver: process.env.DNS_RESOLVER ?? "127.0.0.11",
-        maxRedirectUris: 10,
+        // The root app registers 2x suffixes (its own `<app>-<suffix>` hosts plus
+        // the bare ones), so this has to clear 2x the largest realistic suffix
+        // list — today 3 (domain + nip.io + sslip.io), with IPv6 variants already
+        // stubbed out in .pcs.env.
+        maxRedirectUris: 20,
         hostSuffixes: parseHostSuffixes(process.env.REDIRECT_HOST_SUFFIXES),
+        rootClientId: parseRootClientId(process.env.ROOT_CLIENT_ID),
     };
 }

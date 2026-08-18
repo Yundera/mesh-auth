@@ -1,5 +1,12 @@
 import { expect } from "chai";
-import { computeAppHosts, validateContainerName, validateRedirectUri, ValidationError } from "../validation.js";
+import {
+    computeAllowedHosts,
+    computeAppHosts,
+    validateCallbackPath,
+    validateContainerName,
+    validateRedirectUri,
+    ValidationError,
+} from "../validation.js";
 
 const SUFFIXES = ["wisera.inojob.com", "80-241-218-30.nip.io", "80-241-218-30.sslip.io"];
 
@@ -46,6 +53,48 @@ describe("computeAppHosts", () => {
             "myapp-alice.example.com",
             "myapp-tenant-7.internal",
         ]);
+    });
+});
+
+describe("computeAllowedHosts", () => {
+    it("gives an ordinary app only its own <app>-<suffix> hosts", () => {
+        expect(
+            computeAllowedHosts({ clientId: "myapp", hostSuffixes: SUFFIXES, rootClientId: "maison" }),
+        ).to.deep.equal(computeAppHosts("myapp", SUFFIXES));
+    });
+
+    it("appends the bare suffixes for the root app, after its own hosts", () => {
+        // Order is load-bearing: callers treat entry 0 as their canonical origin,
+        // and for an AppShield acting as an OAuth AS that value is the issuer.
+        expect(
+            computeAllowedHosts({ clientId: "maison", hostSuffixes: SUFFIXES, rootClientId: "maison" }),
+        ).to.deep.equal([
+            "maison-wisera.inojob.com",
+            "maison-80-241-218-30.nip.io",
+            "maison-80-241-218-30.sslip.io",
+            "wisera.inojob.com",
+            "80-241-218-30.nip.io",
+            "80-241-218-30.sslip.io",
+        ]);
+    });
+
+    it("gives nobody the bare suffixes when no root app is configured", () => {
+        for (const rootClientId of ["", undefined]) {
+            expect(
+                computeAllowedHosts({ clientId: "maison", hostSuffixes: SUFFIXES, rootClientId }),
+            ).to.deep.equal(computeAppHosts("maison", SUFFIXES));
+        }
+    });
+
+    it("lowercases the bare suffixes and dedups against the app's own hosts", () => {
+        expect(
+            computeAllowedHosts({ clientId: "app", hostSuffixes: ["Alice.EXAMPLE.com"], rootClientId: "app" }),
+        ).to.deep.equal(["app-alice.example.com", "alice.example.com"]);
+        // A suffix list that already spells out the app's own host must not
+        // produce the same URI twice.
+        expect(
+            computeAllowedHosts({ clientId: "app", hostSuffixes: ["x.test", "app-x.test"], rootClientId: "app" }),
+        ).to.deep.equal(["app-x.test", "app-app-x.test", "x.test"]);
     });
 });
 
@@ -96,5 +145,67 @@ describe("validateRedirectUri", () => {
     it("rejects overly long URIs", () => {
         const long = "https://appshield-demo-wisera.inojob.com/" + "a".repeat(3000);
         expect(() => validateRedirectUri(long, opts)).to.throw(ValidationError);
+    });
+});
+
+describe("validateRedirectUri with a root app's allowlist", () => {
+    const rootOpts = {
+        clientId: "maison",
+        allowedHosts: new Set(
+            computeAllowedHosts({ clientId: "maison", hostSuffixes: SUFFIXES, rootClientId: "maison" }),
+        ),
+    };
+
+    it("accepts the bare root hostname for the root app", () => {
+        expect(() => validateRedirectUri("https://wisera.inojob.com/nhl-auth/oidc/callback", rootOpts)).to.not.throw();
+        expect(() => validateRedirectUri("https://maison-wisera.inojob.com/nhl-auth/oidc/callback", rootOpts)).to.not.throw();
+    });
+
+    it("still refuses another app's host", () => {
+        expect(() => validateRedirectUri("https://beacon-wisera.inojob.com/cb", rootOpts)).to.throw(ValidationError);
+    });
+
+    it("refuses the bare hostname for an app that is NOT the root app", () => {
+        // The whole security property: being able to ASK for the bare host is not
+        // enough — the caller has to be the container the root domain points at.
+        const opts = {
+            clientId: "beacon",
+            allowedHosts: new Set(
+                computeAllowedHosts({ clientId: "beacon", hostSuffixes: SUFFIXES, rootClientId: "maison" }),
+            ),
+        };
+        expect(() => validateRedirectUri("https://wisera.inojob.com/cb", opts)).to.throw(ValidationError);
+    });
+});
+
+describe("validateCallbackPath", () => {
+    it("accepts ordinary callback paths", () => {
+        expect(validateCallbackPath("/nhl-auth/oidc/callback")).to.equal("/nhl-auth/oidc/callback");
+        expect(validateCallbackPath("/")).to.equal("/");
+        expect(validateCallbackPath("/cb?tenant=a")).to.equal("/cb?tenant=a");
+    });
+
+    it("rejects anything that is not a plain absolute path", () => {
+        expect(() => validateCallbackPath("cb")).to.throw(ValidationError);
+        expect(() => validateCallbackPath("https://evil.com/cb")).to.throw(ValidationError);
+        expect(() => validateCallbackPath("//evil.com/cb")).to.throw(ValidationError);
+        expect(() => validateCallbackPath("/\\evil.com/cb")).to.throw(ValidationError);
+        expect(() => validateCallbackPath("/cb#frag")).to.throw(ValidationError);
+        expect(() => validateCallbackPath("/a/../../cb")).to.throw(ValidationError);
+        expect(() => validateCallbackPath("/cb with space")).to.throw(ValidationError);
+    });
+
+    it("rejects control characters (header/URI smuggling into the join)", () => {
+        expect(() => validateCallbackPath("/cb" + String.fromCharCode(7) + "x")).to.throw(ValidationError);
+        expect(() => validateCallbackPath("/cb" + String.fromCharCode(10) + "Host: evil")).to.throw(ValidationError);
+        expect(() => validateCallbackPath("/cb" + String.fromCharCode(0))).to.throw(ValidationError);
+    });
+
+    it("rejects non-strings, empties and overly long paths", () => {
+        expect(() => validateCallbackPath(undefined)).to.throw(ValidationError);
+        expect(() => validateCallbackPath(42)).to.throw(ValidationError);
+        expect(() => validateCallbackPath(["/cb"])).to.throw(ValidationError);
+        expect(() => validateCallbackPath("")).to.throw(ValidationError);
+        expect(() => validateCallbackPath("/" + "a".repeat(512))).to.throw(ValidationError);
     });
 });

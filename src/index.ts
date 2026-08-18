@@ -20,4 +20,9 @@ const app = buildServer({ config, attestor, registrar });
 app.listen(config.port, () => {
     const target = config.backend === "dex" ? `dex=${config.dexGrpcAddr}` : `script=${config.scriptPath}`;
     console.log(`[registrar] listening on :${config.port} backend=${config.backend} issuer=${config.issuerUrl} ${target}`);
+    console.log(`[registrar] redirect host suffixes: ${config.hostSuffixes.join(", ") || "(none — all registrations rejected)"}`);
+    // Stated explicitly because the failure mode of an unset/unusable value is a
+    // working login that silently lands on the wrong hostname — the exact symptom
+    // this setting exists to fix. "none" here is the first thing to check.
+    console.log(`[registrar] root app (may claim the bare suffixes): ${config.rootClientId || "none"}`);
 });
