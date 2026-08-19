@@ -19,6 +19,11 @@ export interface ServerDeps {
 interface RegisterRequestBody {
     redirect_uris?: unknown;
     callback_path?: unknown;
+    // Logout paths, both optional. Same contract as callback_path: the caller
+    // states only the PATH and the registrar supplies the hosts, because the
+    // host set is a property of the deployment, not of the app.
+    post_logout_path?: unknown;
+    backchannel_logout_path?: unknown;
 }
 
 interface RedirectUriOptions {
@@ -58,6 +63,26 @@ function validateSubmittedRedirectUris(raw: unknown, opts: RedirectUriOptions): 
 // The result still goes through validateRedirectUri, so caller-supplied and
 // registrar-derived URIs are governed by exactly one invariant rather than two
 // that could drift.
+// Back-channel logout is the ONE URI here that is not a browser redirect: Dex
+// POSTs to it server-to-server. It therefore uses the container name on the
+// internal `pcs` network rather than a public https host.
+//
+// That is a deliberate choice, not a shortcut. A public URL would leave the box,
+// hit the gateway/CDN and come back in — a hairpin that is unreliable on exactly
+// the NAT'd hosts this platform targets, and it would make a core auth mechanism
+// depend on external DNS and TLS being healthy. Internally, `<client-id>` is the
+// gate's container name by construction (the registrar attests it by PTR lookup
+// of the caller), and both Dex and every gate sit on `pcs`.
+//
+// Consequently it does NOT go through validateRedirectUri: that helper requires
+// https and a host from the attested public set, and neither applies to an
+// intra-network POST. The identity guarantee here comes from the same PTR
+// attestation that produced clientId.
+function deriveBackchannelUri(clientId: string, rawPath: unknown): string {
+    const path = validateCallbackPath(rawPath);
+    return `http://${clientId}${path}`;
+}
+
 function deriveRedirectUris(hosts: readonly string[], rawPath: unknown, opts: RedirectUriOptions): string[] {
     const callbackPath = validateCallbackPath(rawPath);
 
@@ -129,10 +154,32 @@ export function buildServer(deps: ServerDeps): Express {
                     ? deriveRedirectUris(allowedHostList, body.callback_path, uriOpts)
                     : validateSubmittedRedirectUris(body?.redirect_uris, uriOpts);
 
-            const { clientSecret } = await registrar.register(clientId, redirectUris);
+            // Logout wiring. Both optional and independent: an AppShield old
+            // enough to send neither registers exactly as it always did, and a
+            // half-configured one still gets whichever half it asked for.
+            //
+            // post_logout_redirect_uris reuses deriveRedirectUris — same hosts,
+            // same validation — because it IS a browser redirect target and must
+            // be governed by the same invariant as the callback. Dex refuses any
+            // post_logout_redirect_uri not in this list.
+            const postLogoutRedirectUris =
+                body?.post_logout_path !== undefined
+                    ? deriveRedirectUris(allowedHostList, body.post_logout_path, uriOpts)
+                    : undefined;
+            const backchannelLogoutUri =
+                body?.backchannel_logout_path !== undefined
+                    ? deriveBackchannelUri(clientId, body.backchannel_logout_path)
+                    : undefined;
+
+            const { clientSecret } = await registrar.register(clientId, redirectUris, {
+                postLogoutRedirectUris,
+                backchannelLogoutUri,
+            });
 
             console.log(
-                `[registrar] registered client_id=${clientId} redirects=${redirectUris.length} source=${sourceIp}`,
+                `[registrar] registered client_id=${clientId} redirects=${redirectUris.length} ` +
+                    `post_logout=${postLogoutRedirectUris?.length ?? 0} ` +
+                    `backchannel=${backchannelLogoutUri ? "yes" : "no"} source=${sourceIp}`,
             );
             res.status(200).json({
                 client_id: clientId,
@@ -143,6 +190,9 @@ export function buildServer(deps: ServerDeps): Express {
                 // its own host set has no way to know about the bare root hostname,
                 // which is not a function of its name.
                 redirect_uris: redirectUris,
+                // Echoed for the same reason as redirect_uris: the caller cannot
+                // derive the authoritative host set itself.
+                post_logout_redirect_uris: postLogoutRedirectUris,
             });
         } catch (err) {
             next(err);

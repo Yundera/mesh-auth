@@ -10,8 +10,28 @@ export interface RegistrationResult {
     clientSecret: string;
 }
 
+/**
+ * Logout wiring for a client, both optional.
+ *
+ * Separated from the positional arguments rather than added to them because
+ * only the Dex registrar can act on them: Authelia (ShellRegistrar) has its own
+ * logout and no equivalent registration surface, so it ignores these. A
+ * registrar that cannot honour them must degrade to "this app's session only"
+ * rather than fail — losing reach, not login.
+ */
+export interface LogoutRegistration {
+    /** Allowed post_logout_redirect_uri values (RP-Initiated Logout 1.0). */
+    postLogoutRedirectUris?: string[];
+    /** Where the OP POSTs logout tokens (Back-Channel Logout 1.0). */
+    backchannelLogoutUri?: string;
+}
+
 export interface Registrar {
-    register(clientId: string, redirectUris: string[]): Promise<RegistrationResult>;
+    register(
+        clientId: string,
+        redirectUris: string[],
+        logout?: LogoutRegistration,
+    ): Promise<RegistrationResult>;
 }
 
 /**
@@ -29,6 +49,8 @@ export class ShellRegistrar implements Registrar {
         private readonly timeoutMs: number = 60_000,
     ) {}
 
+    // `logout` is accepted and ignored: Authelia is not an OIDC OP we drive
+    // logout through, and it has no client field to put these in.
     register(clientId: string, redirectUris: string[]): Promise<RegistrationResult> {
         if (redirectUris.length === 0) {
             return Promise.reject(new RegistrationError("at least one redirect URI is required"));

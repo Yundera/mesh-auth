@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as grpc from "@grpc/grpc-js";
 import * as protoLoader from "@grpc/proto-loader";
-import { Registrar, RegistrationError, RegistrationResult } from "./registration.js";
+import { LogoutRegistration, Registrar, RegistrationError, RegistrationResult } from "./registration.js";
 
 const moduleDir = dirname(fileURLToPath(import.meta.url));
 // dist/registration.dex.js -> dist/dex/api.proto (copied from src by scripts/copy-assets.mjs)
@@ -16,6 +16,11 @@ interface DexClient {
     redirectUris: string[];
     name: string;
     public: boolean;
+    // Logout wiring — Dex master only (no release carries these yet). Omitted
+    // rather than sent empty when the caller supplies nothing, so an older Dex
+    // sees exactly the message it saw before.
+    backchannelLogoutUri?: string;
+    postLogoutRedirectUris?: string[];
 }
 
 interface CreateClientResp {
@@ -29,9 +34,17 @@ interface NotFoundResp {
 
 type Cb<T> = (err: grpc.ServiceError | null, resp: T) => void;
 
+interface DexUpdateReq {
+    id: string;
+    redirectUris: string[];
+    name: string;
+    backchannelLogoutUri?: string;
+    postLogoutRedirectUris?: string[];
+}
+
 interface DexService {
     CreateClient(req: { client: DexClient }, cb: Cb<CreateClientResp>): void;
-    UpdateClient(req: { id: string; redirectUris: string[]; name: string }, cb: Cb<NotFoundResp>): void;
+    UpdateClient(req: DexUpdateReq, cb: Cb<NotFoundResp>): void;
     DeleteClient(req: { id: string }, cb: Cb<NotFoundResp>): void;
 }
 
@@ -70,7 +83,11 @@ export class DexGrpcRegistrar implements Registrar {
         this.dex = loadDexService(grpcAddr);
     }
 
-    async register(clientId: string, redirectUris: string[]): Promise<RegistrationResult> {
+    async register(
+        clientId: string,
+        redirectUris: string[],
+        logout: LogoutRegistration = {},
+    ): Promise<RegistrationResult> {
         if (redirectUris.length === 0) {
             throw new RegistrationError("at least one redirect URI is required");
         }
@@ -78,7 +95,7 @@ export class DexGrpcRegistrar implements Registrar {
         const existing = await this.readSecret(clientId);
         const secret = existing ?? randomBytes(32).toString("hex");
 
-        const resp = await this.createClient(clientId, secret, redirectUris);
+        const resp = await this.createClient(clientId, secret, redirectUris, logout);
 
         if (!resp.alreadyExists) {
             await this.persistSecret(clientId, secret);
@@ -88,7 +105,13 @@ export class DexGrpcRegistrar implements Registrar {
         // Client already exists in Dex.
         if (existing) {
             // We own the secret already; keep redirect URIs in sync (best-effort).
-            await this.updateClient(clientId, redirectUris).catch((err: unknown) => {
+            //
+            // THIS is the path that matters for the logout rollout: every gate
+            // already registered before logout existed takes it, so UpdateClient
+            // — not CreateClient — is what actually attaches the back-channel URI
+            // to the fleet. Sending them only on create would leave every
+            // existing client silently un-notified forever.
+            await this.updateClient(clientId, redirectUris, logout).catch((err: unknown) => {
                 console.warn(`[registrar] UpdateClient(${clientId}) failed: ${String(err)}`);
             });
             return { clientSecret: existing };
@@ -97,7 +120,7 @@ export class DexGrpcRegistrar implements Registrar {
         // Exists in Dex but the local secret was lost (Dex never echoes it back).
         // Recover by rotating: delete then recreate with a known secret.
         await this.deleteClient(clientId);
-        const recreated = await this.createClient(clientId, secret, redirectUris);
+        const recreated = await this.createClient(clientId, secret, redirectUris, logout);
         if (recreated.alreadyExists) {
             throw new RegistrationError(`failed to recover client ${clientId}: still exists after delete`);
         }
@@ -105,19 +128,36 @@ export class DexGrpcRegistrar implements Registrar {
         return { clientSecret: secret };
     }
 
-    private createClient(id: string, secret: string, redirectUris: string[]): Promise<CreateClientResp> {
+    private createClient(
+        id: string,
+        secret: string,
+        redirectUris: string[],
+        logout: LogoutRegistration,
+    ): Promise<CreateClientResp> {
+        const client: DexClient = { id, secret, redirectUris, name: id, public: false };
+        if (logout.backchannelLogoutUri) client.backchannelLogoutUri = logout.backchannelLogoutUri;
+        if (logout.postLogoutRedirectUris?.length) {
+            client.postLogoutRedirectUris = logout.postLogoutRedirectUris;
+        }
         return new Promise((resolve, reject) => {
-            this.dex.CreateClient(
-                { client: { id, secret, redirectUris, name: id, public: false } },
-                (err, resp) =>
-                    err ? reject(new RegistrationError(`Dex CreateClient failed: ${err.message}`)) : resolve(resp),
+            this.dex.CreateClient({ client }, (err, resp) =>
+                err ? reject(new RegistrationError(`Dex CreateClient failed: ${err.message}`)) : resolve(resp),
             );
         });
     }
 
-    private updateClient(id: string, redirectUris: string[]): Promise<void> {
+    private updateClient(
+        id: string,
+        redirectUris: string[],
+        logout: LogoutRegistration,
+    ): Promise<void> {
+        const req: DexUpdateReq = { id, redirectUris, name: id };
+        if (logout.backchannelLogoutUri) req.backchannelLogoutUri = logout.backchannelLogoutUri;
+        if (logout.postLogoutRedirectUris?.length) {
+            req.postLogoutRedirectUris = logout.postLogoutRedirectUris;
+        }
         return new Promise((resolve, reject) => {
-            this.dex.UpdateClient({ id, redirectUris, name: id }, (err) =>
+            this.dex.UpdateClient(req, (err) =>
                 err ? reject(new RegistrationError(`Dex UpdateClient failed: ${err.message}`)) : resolve(),
             );
         });

@@ -1,6 +1,9 @@
 // Minimal subset of Dex's gRPC API (api/v2/api.proto) — only the client-
 // management RPCs the registrar uses. Field numbers MUST match upstream Dex so
-// the wire format is compatible. Verified against ghcr.io/dexidp/dex:v2.43.1.
+// the wire format is compatible. Verified against ghcr.io/dexidp/dex:v2.43.1;
+// the logout fields (Client 10/11, UpdateClientReq 8/9) were re-verified against
+// api/v2/api.proto on master — the tree the digest pinned in template-root's
+// docker-compose.yml builds from. They do not exist in any release yet.
 syntax = "proto3";
 
 package api;
@@ -16,6 +19,19 @@ message Client {
   bool public = 5;
   string name = 6;
   string logo_url = 7;
+  // 8 = allowed_connectors, 9 = sso_shared_with, 12 = refresh_token_lifetime
+  // upstream. Deliberately not declared: the registrar does not set them, and
+  // leaving the numbers unused keeps this a subset without inviting a renumber.
+  //
+  // Where Dex POSTs a signed logout token when a session this client took part
+  // in ends (OIDC Back-Channel Logout 1.0). This is what lets ONE logout end
+  // every app's gate session — the alternative was a shared secret across gates
+  // that do not share one. Empty means the client is simply not notified.
+  string backchannel_logout_uri = 10;
+  // Where the browser may be sent after an RP-initiated logout. Dex REFUSES a
+  // post_logout_redirect_uri that is not in this list, so a gate that does not
+  // register one dead-ends on Dex's own page instead of returning to the app.
+  repeated string post_logout_redirect_uris = 11;
 }
 
 message CreateClientReq {
@@ -33,6 +49,14 @@ message UpdateClientReq {
   repeated string trusted_peers = 3;
   string name = 4;
   string logo_url = 5;
+  // 6 = allowed_connectors, 7 = sso_shared_with, 10 = refresh_token_lifetime
+  // upstream; not declared here for the same reason as in Client.
+  //
+  // `optional` upstream so that an empty value can CLEAR the URI rather than
+  // reading as "leave it alone" — kept optional here to match the wire format
+  // exactly, even though the registrar only ever sets a non-empty value.
+  optional string backchannel_logout_uri = 8;
+  repeated string post_logout_redirect_uris = 9;
 }
 
 message UpdateClientResp {
