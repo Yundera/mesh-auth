@@ -1,13 +1,18 @@
-FROM node:lts AS base
+FROM node:24 AS base
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
-RUN corepack enable
-RUN corepack prepare pnpm@9.9.0 --activate
+
+# Install corepack and enable it
+RUN npm install -g corepack@latest && corepack enable
 
 WORKDIR /app
 COPY package.json /app
 COPY pnpm-lock.yaml /app
 COPY .npmrc /app
+COPY pnpm-workspace.yaml /app
+
+# Install the exact pnpm version specified in package.json
+RUN corepack install
 
 FROM base AS prod-deps
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --prod --frozen-lockfile

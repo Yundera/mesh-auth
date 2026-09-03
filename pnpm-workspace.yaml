@@ -1,0 +1,13 @@
+# pnpm 11 no longer reads the "pnpm" field of package.json, nor pnpm-specific
+# keys from .npmrc — settings live here.
+#
+# shamefullyHoist mirrors `shamefully-hoist=true` in .npmrc, which pnpm 11
+# ignores *silently*: without this the image ships 3 top-level packages in
+# node_modules instead of ~91 and transitive requires fail at runtime.
+shamefullyHoist: true
+
+# Dependency build scripts are blocked by default since pnpm 10. protobufjs ran
+# its script under the previous pnpm 9 pin, so keep it approved to leave the
+# installed tree unchanged. `pnpm approve-builds` maintains this map.
+allowBuilds:
+  protobufjs: true
