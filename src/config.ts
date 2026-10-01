@@ -8,6 +8,13 @@ export type RegistrarBackend = "authelia" | "dex";
 export interface Config {
     port: number;
     issuerUrl: string;
+    // Where on-box callers reach the SAME issuer without leaving the machine
+    // (e.g. http://dex:5556). Returned to clients as `internal_issuer_url` so
+    // they send their server-to-server calls (discovery, token, JWKS) there
+    // while keeping `issuerUrl` as the identity. Empty string = not offered,
+    // and clients keep dialling the public issuer. Sourced from
+    // INTERNAL_ISSUER_URL; see parseInternalIssuerUrl.
+    internalIssuerUrl: string;
     backend: RegistrarBackend;
     scriptPath: string;
     dexGrpcAddr: string;
@@ -76,6 +83,24 @@ function parseRootClientId(raw: string | undefined): string {
     }
 }
 
+/**
+ * INTERNAL_ISSUER_URL is the issuer as seen from inside the box: same server,
+ * same paths, different address. A client that resolves the public issuer
+ * hostname leaves the machine and comes back in through the gateway/CDN — the
+ * same hairpin deriveBackchannelUri avoids in the other direction (server.ts).
+ *
+ * Optional, and a bad value is fatal rather than ignored: silently dropping it
+ * would put every client back on the public path with nothing to show for it.
+ */
+function parseInternalIssuerUrl(raw: string | undefined): string {
+    const value = (raw ?? "").trim();
+    if (!value) return "";
+    if (!/^https?:\/\//.test(value)) {
+        throw new Error(`INTERNAL_ISSUER_URL must be an http(s) URL (got: ${raw})`);
+    }
+    return value.replace(/\/+$/, "");
+}
+
 export function loadConfig(): Config {
     const issuerUrl = process.env.ISSUER_URL;
     if (!issuerUrl || !/^https?:\/\//.test(issuerUrl)) {
@@ -97,6 +122,7 @@ export function loadConfig(): Config {
     return {
         port,
         issuerUrl: issuerUrl.replace(/\/+$/, ""),
+        internalIssuerUrl: parseInternalIssuerUrl(process.env.INTERNAL_ISSUER_URL),
         backend,
         scriptPath: process.env.REGISTER_SCRIPT_PATH ?? "/yundera/scripts/tools/register-oidc-client.sh",
         dexGrpcAddr: process.env.DEX_GRPC_ADDR ?? "dex:5557",

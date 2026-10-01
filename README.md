@@ -9,7 +9,7 @@ A sidecar POSTs to `http://auth-registrar:9092/register`. The registrar:
 1. Identifies the caller via **PTR lookup of the source IP on the pcs network's embedded DNS** (`127.0.0.11`). The result is the caller's Docker `container_name`, which the app store already constrains to equal the store ID. `client_id` is derived, not accepted.
 2. Recomputes the exact hostnames that app may use — `<client_id>-<suffix>` for each configured suffix, plus the **bare** suffixes if it is the root app (see below). Never from anything the caller sent.
 3. Registers the client with the configured backend (Dex gRPC `CreateClient`, or the legacy `register-oidc-client.sh` shell-out for Authelia). Both are idempotent.
-4. Returns `{client_id, client_secret, issuer_url, redirect_uris}`.
+4. Returns `{client_id, client_secret, issuer_url, redirect_uris}` — plus `internal_issuer_url` when the deployment configures one (see [Internal issuer](#internal-issuer)).
 
 ## API
 
@@ -72,6 +72,23 @@ It is compared against the PTR-attested `client_id`, so an app still cannot clai
 [registrar] root app (may claim the bare suffixes): none
 ```
 
+## Internal issuer
+
+`issuer_url` is a public hostname, and it has to be: it is the `iss` of every token and the address the browser is redirected to. But a relying party also calls the issuer **server-to-server** — discovery, the code→token exchange, the JWKS fetch — and resolving that hostname from inside the box sends those calls out through the gateway/CDN and back in. That hairpin is slow, depends on external DNS and TLS for traffic between two containers on one bridge, and has been seen answering a majority of requests with an empty body.
+
+`INTERNAL_ISSUER_URL` is the same issuer as reached from inside (on a PCS: `http://dex:5556`, the listener Caddy already proxies to). When set, the response carries it:
+
+```
+"issuer_url": "https://auth-alice.nsl.sh",
+"internal_issuer_url": "http://dex:5556"
+```
+
+The contract for a caller: keep using `issuer_url` for everything that is identity or browser-facing, and send your own requests for URLs under `issuer_url` to the same path under `internal_issuer_url` instead. The two must be the same server — same paths, same keys — only the address differs. AppShield implements it (`OIDC back-channel` in its README).
+
+It is the mirror image of the back-channel logout URI, which the registrar already derives as `http://<client-id>/…` so that Dex reaches the gate without leaving the box either.
+
+Compatible both ways: a caller that predates the field ignores it and keeps dialling the public issuer; a caller that understands it, talking to a registrar that doesn't send it, does the same.
+
 ## Security model
 
 - **Never expose this service publicly.** Internal pcs network only. Use `expose:` in compose, never `ports:`.
@@ -84,6 +101,7 @@ It is compared against the PTR-attested `client_id`, so an app still cannot clai
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `ISSUER_URL` | yes | — | OIDC issuer URL (e.g. `https://auth-${DOMAIN}`). Returned to clients so they don't need to configure it. |
+| `INTERNAL_ISSUER_URL` | no | — | The same issuer as reached from inside the box (e.g. `http://dex:5556`). Returned as `internal_issuer_url`; a client that understands it sends its discovery, token and JWKS requests there and keeps `issuer_url` as the identity, so those calls never leave the machine. Unset ⇒ field omitted, clients dial the public issuer. See [Internal issuer](#internal-issuer). |
 | `PORT` | no | `9092` | Listen port (pcs-internal). |
 | `REGISTRAR_BACKEND` | no | `authelia` | `dex` → Dex gRPC `CreateClient`; `authelia` → `register-oidc-client.sh` shell-out. |
 | `REDIRECT_HOST_SUFFIXES` | no | — | Comma-separated host suffixes (the part after `<app>-`), e.g. `${DOMAIN},${PUBLIC_IP_DASH}.nip.io,${PUBLIC_IP_DASH}.sslip.io`. **Unset ⇒ fail closed**: every registration is rejected. Must list the same suffixes the apps' `caddy_*` labels use. |

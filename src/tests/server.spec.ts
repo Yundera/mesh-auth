@@ -26,6 +26,7 @@ class StubRegistrar implements Registrar {
 const baseConfig: Config = {
     port: 0,
     issuerUrl: "https://auth-test.local",
+    internalIssuerUrl: "",
     backend: "authelia",
     scriptPath: "/dev/null",
     dexGrpcAddr: "dex:5557",
@@ -87,6 +88,24 @@ describe("server /register", () => {
             expect(reg.calls).to.have.length(1);
             expect(reg.calls[0].clientId).to.equal("myapp");
             expect(reg.calls[0].redirectUris).to.deep.equal(["https://myapp-alice.nsl.sh/cb"]);
+        } finally {
+            await srv.close();
+        }
+    });
+
+    it("returns internal_issuer_url beside the public issuer when configured", async () => {
+        const srv = await start({
+            attestor: new StubAttestor("myapp"),
+            registrar: new StubRegistrar({ clientSecret: "abcd1234" }),
+            config: { internalIssuerUrl: "http://dex:5556" },
+        });
+        try {
+            const { status, body } = await postJson(`${srv.url}/register`, {
+                redirect_uris: ["https://myapp-alice.nsl.sh/cb"],
+            });
+            expect(status).to.equal(200);
+            expect(body.issuer_url).to.equal("https://auth-test.local");
+            expect(body.internal_issuer_url).to.equal("http://dex:5556");
         } finally {
             await srv.close();
         }

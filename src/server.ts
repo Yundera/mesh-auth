@@ -185,6 +185,12 @@ export function buildServer(deps: ServerDeps): Express {
                 client_id: clientId,
                 client_secret: clientSecret,
                 issuer_url: config.issuerUrl,
+                // Same issuer, reached without leaving the box. Identity stays
+                // `issuer_url` (it is the `iss` of every token and what the
+                // browser visits); this is only where the caller should SEND its
+                // own discovery/token/JWKS requests. Omitted when not configured,
+                // and ignored by callers that predate it.
+                internal_issuer_url: config.internalIssuerUrl || undefined,
                 // The authoritative list, echoed so the caller can adopt it instead
                 // of recomputing `<app>-<suffix>` on its own. A caller that derives
                 // its own host set has no way to know about the bare root hostname,
