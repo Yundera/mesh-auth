@@ -6,6 +6,15 @@ export class RegistrationError extends Error {
     }
 }
 
+/**
+ * The identity provider behind the registrar cannot be reached at all — as
+ * opposed to refusing the request. On a box with no login connector Dex is
+ * deliberately not running, so this is an expected state, not a fault: callers
+ * get a 503 they can show as "sign-in is not available yet" and retry, rather
+ * than a 500 that reads as a bug.
+ */
+export class RegistrarUnavailableError extends RegistrationError {}
+
 export interface RegistrationResult {
     clientSecret: string;
 }

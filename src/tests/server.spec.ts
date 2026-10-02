@@ -1,9 +1,11 @@
 import { expect } from "chai";
+import * as grpc from "@grpc/grpc-js";
 import http from "node:http";
 import { AddressInfo } from "node:net";
 import { Attestor } from "../attestation.js";
 import { Config } from "../config.js";
-import { Registrar, RegistrationResult } from "../registration.js";
+import { Registrar, RegistrarUnavailableError, RegistrationError, RegistrationResult } from "../registration.js";
+import { dexCallError } from "../registration.dex.js";
 import { buildServer } from "../server.js";
 
 class StubAttestor implements Attestor {
@@ -23,10 +25,18 @@ class StubRegistrar implements Registrar {
     }
 }
 
+class FailingRegistrar implements Registrar {
+    constructor(private readonly err: Error) {}
+    async register(): Promise<RegistrationResult> {
+        throw this.err;
+    }
+}
+
 const baseConfig: Config = {
     port: 0,
     issuerUrl: "https://auth-test.local",
     internalIssuerUrl: "",
+    setupUrl: "",
     backend: "authelia",
     scriptPath: "/dev/null",
     dexGrpcAddr: "dex:5557",
@@ -336,6 +346,64 @@ describe("server /register with callback_path (registrar-authoritative)", () => 
         } finally {
             await srv.close();
         }
+    });
+});
+
+describe("server /register when the backend fails", () => {
+    async function register(registrar: Registrar, config?: Partial<Config>) {
+        const srv = await start({ attestor: new StubAttestor("myapp"), registrar, config });
+        try {
+            const res = await fetch(`${srv.url}/register`, {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ redirect_uris: ["https://myapp-alice.nsl.sh/cb"] }),
+            });
+            return { status: res.status, retryAfter: res.headers.get("retry-after"), body: await res.json() };
+        } finally {
+            await srv.close();
+        }
+    }
+
+    it("answers 503 login_unavailable with the setup url when Dex cannot be reached", async () => {
+        const res = await register(new FailingRegistrar(new RegistrarUnavailableError("Dex CreateClient failed: 14 UNAVAILABLE")), {
+            setupUrl: "https://admin-alice.nsl.sh/",
+        });
+        expect(res.status).to.equal(503);
+        expect(res.retryAfter).to.equal("15");
+        expect(res.body).to.deep.equal({ error: "login_unavailable", setup_url: "https://admin-alice.nsl.sh/" });
+    });
+
+    it("omits setup_url from the 503 when none is configured", async () => {
+        const res = await register(new FailingRegistrar(new RegistrarUnavailableError("Dex CreateClient failed")));
+        expect(res.status).to.equal(503);
+        expect(res.body).to.deep.equal({ error: "login_unavailable" });
+    });
+
+    it("keeps any other registration failure a 500", async () => {
+        const res = await register(new FailingRegistrar(new RegistrationError("Dex CreateClient failed: 3 INVALID_ARGUMENT")), {
+            setupUrl: "https://admin-alice.nsl.sh/",
+        });
+        expect(res.status).to.equal(500);
+        expect(res.retryAfter).to.equal(null);
+        expect(res.body).to.deep.equal({ error: "registration failed: Dex CreateClient failed: 3 INVALID_ARGUMENT" });
+    });
+});
+
+describe("dexCallError", () => {
+    function serviceError(code: grpc.status): grpc.ServiceError {
+        return Object.assign(new Error(`${code} test`), { code, details: "test", metadata: new grpc.Metadata() });
+    }
+
+    it("treats an unreachable or silent Dex as unavailable", () => {
+        expect(dexCallError("CreateClient", serviceError(grpc.status.UNAVAILABLE))).to.be.instanceOf(RegistrarUnavailableError);
+        expect(dexCallError("CreateClient", serviceError(grpc.status.DEADLINE_EXCEEDED))).to.be.instanceOf(RegistrarUnavailableError);
+    });
+
+    it("keeps an answer from Dex a plain registration error", () => {
+        const err = dexCallError("UpdateClient", serviceError(grpc.status.INVALID_ARGUMENT));
+        expect(err).to.be.instanceOf(RegistrationError);
+        expect(err).not.to.be.instanceOf(RegistrarUnavailableError);
+        expect(err.message).to.match(/^Dex UpdateClient failed: /);
     });
 });
 

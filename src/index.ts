@@ -21,6 +21,7 @@ app.listen(config.port, () => {
     const target = config.backend === "dex" ? `dex=${config.dexGrpcAddr}` : `script=${config.scriptPath}`;
     console.log(`[registrar] listening on :${config.port} backend=${config.backend} issuer=${config.issuerUrl} ${target}`);
     console.log(`[registrar] internal issuer (on-box back-channel): ${config.internalIssuerUrl || "none — clients dial the public issuer"}`);
+    console.log(`[registrar] setup url (offered while sign-in is unavailable): ${config.setupUrl || "none"}`);
     console.log(`[registrar] redirect host suffixes: ${config.hostSuffixes.join(", ") || "(none — all registrations rejected)"}`);
     // Stated explicitly because the failure mode of an unset/unusable value is a
     // working login that silently lands on the wrong hostname — the exact symptom

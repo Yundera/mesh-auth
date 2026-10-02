@@ -54,6 +54,7 @@ Error codes:
 - `400` — malformed request, invalid redirect URI or `callback_path`, invalid PTR result
 - `403` — PTR lookup failed (caller not on the expected Docker network)
 - `500` — backend registration failed
+- `503` — the identity provider cannot be reached (Dex gRPC `UNAVAILABLE`, or no answer within 5 s). Not a fault: on a box with no login connector Dex is deliberately absent. Body `{"error":"login_unavailable","setup_url":"…"}` (`setup_url` only when `SETUP_URL` is set), plus `Retry-After: 15`. A gate shows this as "sign-in is not available yet", links to `setup_url` if there is one, and retries.
 
 ## The root app
 
@@ -106,6 +107,7 @@ Compatible both ways: a caller that predates the field ignores it and keeps dial
 | `REGISTRAR_BACKEND` | no | `authelia` | `dex` → Dex gRPC `CreateClient`; `authelia` → `register-oidc-client.sh` shell-out. |
 | `REDIRECT_HOST_SUFFIXES` | no | — | Comma-separated host suffixes (the part after `<app>-`), e.g. `${DOMAIN},${PUBLIC_IP_DASH}.nip.io,${PUBLIC_IP_DASH}.sslip.io`. **Unset ⇒ fail closed**: every registration is rejected. Must list the same suffixes the apps' `caddy_*` labels use. |
 | `ROOT_CLIENT_ID` | no | — | Container the root domain proxies to; the one app that may also register callbacks on the **bare** suffixes. Fed from Caddy's `DEFAULT_SERVICE_HOST`. Non-container values are rejected at boot and nobody claims the bare hosts. See [The root app](#the-root-app). |
+| `SETUP_URL` | no | — | Absolute http(s) URL where the box gets set up (on a PCS: its onboarding page). Returned as `setup_url` in the `503 login_unavailable`, so the gate can link to it. Invalid ⇒ fatal at boot. Unset ⇒ field omitted. |
 | `DEX_GRPC_ADDR` | no | `dex:5557` | Dex gRPC endpoint (`REGISTRAR_BACKEND=dex`). Must be reachable only on an internal network — the API is unauthenticated. |
 | `DEX_CLIENTS_DIR` | no | `/DATA/AppData/yundera/dex/clients` | Where issued client secrets are persisted (Dex never echoes them back). |
 | `REGISTER_SCRIPT_PATH` | no | `/yundera/scripts/tools/register-oidc-client.sh` | Path to the script inside the container (`REGISTRAR_BACKEND=authelia`). |
@@ -113,16 +115,17 @@ Compatible both ways: a caller that predates the field ignores it and keeps dial
 
 ## Deployment
 
-Current PCS shape (Dex backend, from template-root's `root/docker-compose.yml`):
+Current PCS shape (Dex backend, from mesh-router-template-root's `stacks/auth/docker-compose.yml`):
 
 ```yaml
 auth-registrar:
-  image: ghcr.io/yundera/mesh-auth:1.2.0
+  image: ghcr.io/yundera/mesh-auth:1.1.8
   container_name: auth-registrar          # PTR-attested; apps reach it by this name
   environment:
     ISSUER_URL: https://auth-${DOMAIN}
     REGISTRAR_BACKEND: dex
-    DEX_GRPC_ADDR: 172.31.7.2:5557        # isolated dex-internal net
+    INTERNAL_ISSUER_URL: http://dex:5556
+    DEX_GRPC_ADDR: dex-grpc:5557          # alias on the isolated dex-internal net
     DEX_CLIENTS_DIR: /tmp/dex-clients
     # Must list the SAME suffixes the apps' caddy_* labels use.
     REDIRECT_HOST_SUFFIXES: "${DOMAIN},${PUBLIC_IP_DASH}.nip.io,${PUBLIC_IP_DASH}.sslip.io"
@@ -135,8 +138,8 @@ auth-registrar:
   networks:
     pcs: null           # /register from app sidecars + PTR attestation
     dex-internal: null  # gRPC to Dex
-  depends_on:
-    - dex
+  # No depends_on: dex. Dex is absent on a box with no login connector, and the
+  # registrar dials it lazily, answering 503 login_unavailable meanwhile.
 ```
 
 The legacy Authelia backend (`REGISTRAR_BACKEND=authelia`) instead needs `/DATA/AppData/casaos/apps/yundera:/yundera:ro`, `/DATA/AppData/yundera/auth`, and the Docker socket (the script shells out to `authelia/authelia` for argon2 hashing).

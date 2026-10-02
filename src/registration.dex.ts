@@ -4,7 +4,13 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as grpc from "@grpc/grpc-js";
 import * as protoLoader from "@grpc/proto-loader";
-import { LogoutRegistration, Registrar, RegistrationError, RegistrationResult } from "./registration.js";
+import {
+    LogoutRegistration,
+    Registrar,
+    RegistrarUnavailableError,
+    RegistrationError,
+    RegistrationResult,
+} from "./registration.js";
 
 const moduleDir = dirname(fileURLToPath(import.meta.url));
 // dist/registration.dex.js -> dist/dex/api.proto (copied from src by scripts/copy-assets.mjs)
@@ -34,6 +40,31 @@ interface NotFoundResp {
 
 type Cb<T> = (err: grpc.ServiceError | null, resp: T) => void;
 
+// Bounds every Dex call. grpc-js already fails fast when the channel cannot
+// connect (Dex absent: `dex-grpc` does not resolve), but a Dex that accepts the
+// connection and then hangs would otherwise hold /register — and the browser
+// waiting on the gate behind it — open indefinitely.
+const DEX_CALL_TIMEOUT_MS = 5_000;
+
+function callOptions(): grpc.CallOptions {
+    return { deadline: Date.now() + DEX_CALL_TIMEOUT_MS };
+}
+
+/**
+ * Turns a failed Dex RPC into the error /register reports. UNAVAILABLE and
+ * DEADLINE_EXCEEDED mean Dex could not be reached — on a box with no login
+ * connector Dex is deliberately not running — so they become
+ * RegistrarUnavailableError (503). Anything Dex actually answered stays a plain
+ * RegistrationError (500).
+ */
+export function dexCallError(op: string, err: grpc.ServiceError): RegistrationError {
+    const message = `Dex ${op} failed: ${err.message}`;
+    if (err.code === grpc.status.UNAVAILABLE || err.code === grpc.status.DEADLINE_EXCEEDED) {
+        return new RegistrarUnavailableError(message);
+    }
+    return new RegistrationError(message);
+}
+
 interface DexUpdateReq {
     id: string;
     redirectUris: string[];
@@ -43,9 +74,9 @@ interface DexUpdateReq {
 }
 
 interface DexService {
-    CreateClient(req: { client: DexClient }, cb: Cb<CreateClientResp>): void;
-    UpdateClient(req: DexUpdateReq, cb: Cb<NotFoundResp>): void;
-    DeleteClient(req: { id: string }, cb: Cb<NotFoundResp>): void;
+    CreateClient(req: { client: DexClient }, options: grpc.CallOptions, cb: Cb<CreateClientResp>): void;
+    UpdateClient(req: DexUpdateReq, options: grpc.CallOptions, cb: Cb<NotFoundResp>): void;
+    DeleteClient(req: { id: string }, options: grpc.CallOptions, cb: Cb<NotFoundResp>): void;
 }
 
 function loadDexService(addr: string): DexService {
@@ -140,8 +171,8 @@ export class DexGrpcRegistrar implements Registrar {
             client.postLogoutRedirectUris = logout.postLogoutRedirectUris;
         }
         return new Promise((resolve, reject) => {
-            this.dex.CreateClient({ client }, (err, resp) =>
-                err ? reject(new RegistrationError(`Dex CreateClient failed: ${err.message}`)) : resolve(resp),
+            this.dex.CreateClient({ client }, callOptions(), (err, resp) =>
+                err ? reject(dexCallError("CreateClient", err)) : resolve(resp),
             );
         });
     }
@@ -157,16 +188,16 @@ export class DexGrpcRegistrar implements Registrar {
             req.postLogoutRedirectUris = logout.postLogoutRedirectUris;
         }
         return new Promise((resolve, reject) => {
-            this.dex.UpdateClient(req, (err) =>
-                err ? reject(new RegistrationError(`Dex UpdateClient failed: ${err.message}`)) : resolve(),
+            this.dex.UpdateClient(req, callOptions(), (err) =>
+                err ? reject(dexCallError("UpdateClient", err)) : resolve(),
             );
         });
     }
 
     private deleteClient(id: string): Promise<void> {
         return new Promise((resolve, reject) => {
-            this.dex.DeleteClient({ id }, (err) =>
-                err ? reject(new RegistrationError(`Dex DeleteClient failed: ${err.message}`)) : resolve(),
+            this.dex.DeleteClient({ id }, callOptions(), (err) =>
+                err ? reject(dexCallError("DeleteClient", err)) : resolve(),
             );
         });
     }

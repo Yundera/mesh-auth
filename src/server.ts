@@ -1,7 +1,7 @@
 import express, { Express, NextFunction, Request, Response } from "express";
 import { Attestor, AttestationError } from "./attestation.js";
 import { Config } from "./config.js";
-import { Registrar, RegistrationError } from "./registration.js";
+import { Registrar, RegistrarUnavailableError, RegistrationError } from "./registration.js";
 import {
     ValidationError,
     computeAllowedHosts,
@@ -215,6 +215,16 @@ export function buildServer(deps: ServerDeps): Express {
         if (err instanceof AttestationError) {
             console.warn(`[registrar] 403 from ${sourceIp}: ${err.message}`);
             res.status(403).json({ error: `attestation failed: ${err.message}` });
+            return;
+        }
+        // Before the generic RegistrationError: it is a subclass. Not a fault —
+        // Dex is not running (no login connector yet) or not answering — so a
+        // 503 the gate can render as "sign-in is not available yet" and retry.
+        if (err instanceof RegistrarUnavailableError) {
+            console.warn(`[registrar] 503 from ${sourceIp}: ${err.message}`);
+            res.status(503)
+                .set("Retry-After", "15")
+                .json({ error: "login_unavailable", setup_url: config.setupUrl || undefined });
             return;
         }
         if (err instanceof RegistrationError) {

@@ -15,6 +15,13 @@ export interface Config {
     // and clients keep dialling the public issuer. Sourced from
     // INTERNAL_ISSUER_URL; see parseInternalIssuerUrl.
     internalIssuerUrl: string;
+    // Where a user finishes setting the box up, e.g. the onboarding page of a
+    // PCS that has not been claimed yet. Returned as `setup_url` in the 503 a
+    // caller gets while no identity provider is reachable, so the gate can link
+    // to it instead of showing a dead end. Empty string = no such page (the gate
+    // just says sign-in is not available yet). Sourced from SETUP_URL; see
+    // parseSetupUrl.
+    setupUrl: string;
     backend: RegistrarBackend;
     scriptPath: string;
     dexGrpcAddr: string;
@@ -101,6 +108,26 @@ function parseInternalIssuerUrl(raw: string | undefined): string {
     return value.replace(/\/+$/, "");
 }
 
+/**
+ * SETUP_URL is shown to a browser, so it must be an absolute http(s) URL. A bad
+ * value is fatal for the same reason as INTERNAL_ISSUER_URL: ignoring it would
+ * quietly drop the only way out of a box nobody can sign in to yet.
+ */
+function parseSetupUrl(raw: string | undefined): string {
+    const value = (raw ?? "").trim();
+    if (!value) return "";
+    let url: URL;
+    try {
+        url = new URL(value);
+    } catch {
+        throw new Error(`SETUP_URL must be an absolute http(s) URL (got: ${raw})`);
+    }
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+        throw new Error(`SETUP_URL must be an absolute http(s) URL (got: ${raw})`);
+    }
+    return value;
+}
+
 export function loadConfig(): Config {
     const issuerUrl = process.env.ISSUER_URL;
     if (!issuerUrl || !/^https?:\/\//.test(issuerUrl)) {
@@ -123,6 +150,7 @@ export function loadConfig(): Config {
         port,
         issuerUrl: issuerUrl.replace(/\/+$/, ""),
         internalIssuerUrl: parseInternalIssuerUrl(process.env.INTERNAL_ISSUER_URL),
+        setupUrl: parseSetupUrl(process.env.SETUP_URL),
         backend,
         scriptPath: process.env.REGISTER_SCRIPT_PATH ?? "/yundera/scripts/tools/register-oidc-client.sh",
         dexGrpcAddr: process.env.DEX_GRPC_ADDR ?? "dex:5557",
