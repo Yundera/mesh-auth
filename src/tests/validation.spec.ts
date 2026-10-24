@@ -78,6 +78,26 @@ describe("computeAllowedHosts", () => {
         ]);
     });
 
+    it("adds <app>.<suffix> for the dot-form suffixes, after the dash hosts", () => {
+        expect(
+            computeAllowedHosts({ clientId: "Immich", hostSuffixes: SUFFIXES, dotSuffixes: ["wisera.inojob.com"] }),
+        ).to.deep.equal([...computeAppHosts("immich", SUFFIXES), "immich.wisera.inojob.com"]);
+        // the root app: dash, then dot, then bare — entry 0 (the canonical origin) unchanged
+        expect(
+            computeAllowedHosts({
+                clientId: "maison", hostSuffixes: SUFFIXES, dotSuffixes: ["wisera.inojob.com"], rootClientId: "maison",
+            }),
+        ).to.deep.equal([
+            "maison-wisera.inojob.com",
+            "maison-80-241-218-30.nip.io",
+            "maison-80-241-218-30.sslip.io",
+            "maison.wisera.inojob.com",
+            "wisera.inojob.com",
+            "80-241-218-30.nip.io",
+            "80-241-218-30.sslip.io",
+        ]);
+    });
+
     it("gives nobody the bare suffixes when no root app is configured", () => {
         for (const rootClientId of ["", undefined]) {
             expect(

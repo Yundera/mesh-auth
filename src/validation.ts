@@ -38,6 +38,8 @@ export function computeAppHosts(clientId: string, hostSuffixes: readonly string[
 export interface AllowedHostOptions {
     clientId: string;
     hostSuffixes: readonly string[];
+    // Suffixes the app is also reached on as `<app>.<suffix>` (Config.dotSuffixes).
+    dotSuffixes?: readonly string[];
     // The container the PCS root domain proxies to, or "" when nobody owns it.
     // See Config.rootClientId.
     rootClientId?: string;
@@ -54,7 +56,11 @@ export interface AllowedHostOptions {
  * to `<app>-<suffix>` mid-flow, which is what users see as "SSO moved me to a
  * different URL".
  *
- * Bare hosts are appended, NEVER prepended: callers treat the first entry as
+ * A box whose zone is delegated to the mesh nameservers also serves every app as
+ * `<app>.<suffix>` (the dot form, covered by its DNS-01 wildcard) for each of
+ * `dotSuffixes`: those hosts come right after the dash ones.
+ *
+ * Dot and bare hosts are appended, NEVER prepended: callers treat the first entry as
  * their canonical origin, and for an AppShield running as an OAuth AS that value
  * is the issuer baked into already-issued tokens and cached discovery documents.
  * Reordering this list silently rotates that issuer.
@@ -64,8 +70,9 @@ export interface AllowedHostOptions {
  * asking — it has to actually be the container the root domain points at.
  */
 export function computeAllowedHosts(opts: AllowedHostOptions): string[] {
-    const { clientId, hostSuffixes, rootClientId } = opts;
+    const { clientId, hostSuffixes, dotSuffixes, rootClientId } = opts;
     const hosts = computeAppHosts(clientId, hostSuffixes);
+    hosts.push(...(dotSuffixes ?? []).map((suffix) => `${clientId}.${suffix}`.toLowerCase()));
 
     if (rootClientId && rootClientId === clientId) {
         hosts.push(...hostSuffixes.map((suffix) => suffix.toLowerCase()));

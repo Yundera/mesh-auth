@@ -127,6 +127,7 @@ export function buildServer(deps: ServerDeps): Express {
             const allowedHostList = computeAllowedHosts({
                 clientId,
                 hostSuffixes: config.hostSuffixes,
+                dotSuffixes: config.dotSuffixes,
                 rootClientId: config.rootClientId,
             });
             const allowedHosts = new Set(allowedHostList);

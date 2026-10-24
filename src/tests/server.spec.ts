@@ -44,6 +44,7 @@ const baseConfig: Config = {
     dnsResolver: "127.0.0.11",
     maxRedirectUris: 10,
     hostSuffixes: ["alice.nsl.sh", "203-0-113-10.nip.io", "203-0-113-10.sslip.io"],
+    dotSuffixes: [],
     rootClientId: "",
 };
 

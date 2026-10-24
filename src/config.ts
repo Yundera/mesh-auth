@@ -40,6 +40,10 @@ export interface Config {
     //    appshield-demo-80-241-218-30.sslip.io
     // The `<app>-<suffix>` join is the fixed mesh-router subdomain convention.
     hostSuffixes: string[];
+    // Suffixes apps are ALSO reached on in dot form, `<app>.<suffix>`: the box's own
+    // domain once its zone is delegated to the mesh nameservers and it serves the
+    // DNS-01 wildcard. Sourced from REDIRECT_DOT_SUFFIXES (same parsing); empty = none.
+    dotSuffixes: string[];
     // The one app allowed to register callbacks on the BARE suffixes as well as
     // its own `<app>-<suffix>` hosts — i.e. whoever the PCS root domain proxies
     // to. Empty string = nobody, and the bare hostnames have no OIDC owner.
@@ -162,6 +166,7 @@ export function loadConfig(): Config {
         // stubbed out in .pcs.env.
         maxRedirectUris: 20,
         hostSuffixes: parseHostSuffixes(process.env.REDIRECT_HOST_SUFFIXES),
+        dotSuffixes: parseHostSuffixes(process.env.REDIRECT_DOT_SUFFIXES),
         rootClientId: parseRootClientId(process.env.ROOT_CLIENT_ID),
     };
 }
