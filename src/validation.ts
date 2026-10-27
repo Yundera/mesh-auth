@@ -21,9 +21,9 @@ export function validateContainerName(name: string): void {
  * (see Config.hostSuffixes) so the registrar knows nothing about specific
  * domains or DNS providers.
  *
- *   suffixes ["wisera.inojob.com", "80-241-218-30.nip.io", "80-241-218-30.sslip.io"]
+ *   suffixes ["wisera.inojob.com", "80-241-218-30.ip.inojob.com", "80-241-218-30.sslip.io"]
  *   -> appshield-demo-wisera.inojob.com,
- *      appshield-demo-80-241-218-30.nip.io,
+ *      appshield-demo-80-241-218-30.ip.inojob.com,
  *      appshield-demo-80-241-218-30.sslip.io
  *
  * `clientId` is the PTR-attested container name — NOT anything the caller sent —

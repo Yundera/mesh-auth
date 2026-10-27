@@ -30,7 +30,7 @@ Content-Type: application/json
   "issuer_url": "https://auth-alice.nsl.sh",
   "redirect_uris": [
     "https://myapp-alice.nsl.sh/nhl-auth/oidc/callback",
-    "https://myapp-203-0-113-10.nip.io/nhl-auth/oidc/callback",
+    "https://myapp-203-0-113-10.ip.nsl.sh/nhl-auth/oidc/callback",
     "https://myapp-203-0-113-10.sslip.io/nhl-auth/oidc/callback"
   ]
 }
@@ -106,7 +106,7 @@ Compatible both ways: a caller that predates the field ignores it and keeps dial
 | `PORT` | no | `9092` | Listen port (pcs-internal). |
 | `REGISTRAR_BACKEND` | no | `authelia` | `dex` → Dex gRPC `CreateClient`; `authelia` → `register-oidc-client.sh` shell-out. |
 | `REDIRECT_DOT_SUFFIXES` | no | — | Comma-separated suffixes apps are also reached on as `<app>.<suffix>` (dot form), e.g. `${DOMAIN}` on a box whose zone is delegated to the mesh nameservers. Unset ⇒ dash form only. |
-| `REDIRECT_HOST_SUFFIXES` | no | — | Comma-separated host suffixes (the part after `<app>-`), e.g. `${DOMAIN},${PUBLIC_IP_DASH}.nip.io,${PUBLIC_IP_DASH}.sslip.io`. **Unset ⇒ fail closed**: every registration is rejected. Must list the same suffixes the apps' `caddy_*` labels use. |
+| `REDIRECT_HOST_SUFFIXES` | no | — | Comma-separated host suffixes (the part after `<app>-`), e.g. `${DOMAIN},${PUBLIC_IP_DASH}.${IP_ZONE},${PUBLIC_IP_DASH}.sslip.io`. **Unset ⇒ fail closed**: every registration is rejected. Must list the same suffixes the apps' `caddy_*` labels use. |
 | `ROOT_CLIENT_ID` | no | — | Container the root domain proxies to; the one app that may also register callbacks on the **bare** suffixes. Fed from Caddy's `DEFAULT_SERVICE_HOST`. Non-container values are rejected at boot and nobody claims the bare hosts. See [The root app](#the-root-app). |
 | `SETUP_URL` | no | — | Absolute http(s) URL where the box gets set up (on a PCS: its onboarding page). Returned as `setup_url` in the `503 login_unavailable`, so the gate can link to it. Invalid ⇒ fatal at boot. Unset ⇒ field omitted. |
 | `DEX_GRPC_ADDR` | no | `dex:5557` | Dex gRPC endpoint (`REGISTRAR_BACKEND=dex`). Must be reachable only on an internal network — the API is unauthenticated. |
@@ -129,7 +129,7 @@ auth-registrar:
     DEX_GRPC_ADDR: dex-grpc:5557          # alias on the isolated dex-internal net
     DEX_CLIENTS_DIR: /tmp/dex-clients
     # Must list the SAME suffixes the apps' caddy_* labels use.
-    REDIRECT_HOST_SUFFIXES: "${DOMAIN},${PUBLIC_IP_DASH}.nip.io,${PUBLIC_IP_DASH}.sslip.io"
+    REDIRECT_HOST_SUFFIXES: "${DOMAIN},${PUBLIC_IP_DASH}.${IP_ZONE},${PUBLIC_IP_DASH}.sslip.io"
     # Caddy's root-domain upstream — the app that also owns the BARE suffixes.
     # Same variable that drives the Caddyfile's root block, deliberately: one
     # fact, so ownership and routing cannot disagree.

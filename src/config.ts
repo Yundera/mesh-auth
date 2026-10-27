@@ -34,9 +34,9 @@ export interface Config {
     // NOTHING about domains or DNS providers — the suffix list is supplied
     // entirely by config (REDIRECT_HOST_SUFFIXES), so adding/removing a domain or
     // provider is a deployment change, never a code change. Example list:
-    //   wisera.inojob.com, 80-241-218-30.nip.io, 80-241-218-30.sslip.io
+    //   wisera.inojob.com, 80-241-218-30.ip.inojob.com, 80-241-218-30.sslip.io
     // -> appshield-demo-wisera.inojob.com,
-    //    appshield-demo-80-241-218-30.nip.io,
+    //    appshield-demo-80-241-218-30.ip.inojob.com,
     //    appshield-demo-80-241-218-30.sslip.io
     // The `<app>-<suffix>` join is the fixed mesh-router subdomain convention.
     hostSuffixes: string[];
@@ -162,7 +162,7 @@ export function loadConfig(): Config {
         dnsResolver: process.env.DNS_RESOLVER ?? "127.0.0.11",
         // The root app registers 2x suffixes (its own `<app>-<suffix>` hosts plus
         // the bare ones), so this has to clear 2x the largest realistic suffix
-        // list — today 3 (domain + nip.io + sslip.io), with IPv6 variants already
+        // list — today 3 (domain + ip.<zone> + sslip.io), with IPv6 variants already
         // stubbed out in .pcs.env.
         maxRedirectUris: 20,
         hostSuffixes: parseHostSuffixes(process.env.REDIRECT_HOST_SUFFIXES),
